@@ -1,35 +1,44 @@
-# ServiceNow MCP Natural Language Development Server
+# ServiceNow MCP Consultancy
 
-A comprehensive Model Context Protocol (MCP) server that enables natural language development for ServiceNow. This server allows developers to create and manage ServiceNow artifacts using plain English commands.
+A Model Context Protocol (MCP) server that enables natural language interactions with ServiceNow instances, designed to revolutionize how developers and consultants work with the ServiceNow platform.
 
-## 🚀 Features
+## 🚀 Overview
 
-- **Natural Language Interface**: Create ServiceNow catalog items, variables, UI policies, and client scripts using plain English
-- **Multi-Authentication Support**: OAuth2 and Basic Authentication for ServiceNow
-- **Update Set Management**: Automatic update set creation and management with customizable naming conventions
-- **Application Scope Handling**: Automatic application scope detection and switching
-- **ServiceNow Version Compatibility**: Supports Washington through Yokohama versions
-- **Comprehensive Error Handling**: Robust error handling with detailed feedback
-- **TypeScript Support**: Full TypeScript implementation with comprehensive type definitions
+This project provides a natural language interface for ServiceNow development, allowing developers to interact with ServiceNow instances using conversational commands. Built on the Model Context Protocol (MCP), it seamlessly integrates with AI assistants like Claude to provide an intuitive development experience.
 
-## 📋 Supported Natural Language Commands
+## ✨ Features
 
-### Catalog Item Management
-```
-"Create a catalog item called 'New Laptop Request' in IT Service Catalog"
-"Add a catalog item named 'Software License' with description 'Request software licenses'"
-```
+### Core Capabilities
+- **Natural Language Interface**: Interact with ServiceNow using plain English commands
+- **MCP Protocol Implementation**: Full compatibility with Claude and other MCP-enabled AI assistants
+- **ServiceNow REST API Integration**: Comprehensive coverage of ServiceNow REST APIs
+- **Secure Authentication**: Support for basic auth and OAuth 2.0
+- **Session Management**: Intelligent session handling and connection pooling
+- **Comprehensive Logging**: Detailed logging for debugging and monitoring
 
-### Test Connection
-```
-"Use the test-connection tool to verify my ServiceNow instance"
-```
+### ServiceNow Operations
+- **Record Management**: Query, create, update, and delete records from any table
+- **Incident Management**: Create and manage incidents with natural language
+- **Change Management**: Handle change requests and approvals
+- **Knowledge Base**: Search and manage knowledge articles
+- **Workflow Execution**: Trigger and monitor workflows
+- **Catalog Items**: Browse and order from the service catalog
+- **User Management**: Query and update user records
+- **Group Management**: Manage groups and membership
 
 ## 🛠️ Installation
 
+### Prerequisites
+- Node.js 18+ 
+- npm or yarn
+- ServiceNow instance with admin access
+- Claude Desktop (for MCP integration)
+
+### Setup Steps
+
 1. **Clone the repository**
    ```bash
-   git clone https://github.com/pflantzdog27/servicenow-consultancy.git
+   git clone https://github.com/pflantzdog27/servicenow-mcp-consultancy.git
    cd servicenow-consultancy
    ```
 
@@ -41,7 +50,12 @@ A comprehensive Model Context Protocol (MCP) server that enables natural languag
 3. **Configure environment**
    ```bash
    cp .env.example .env
-   # Edit .env with your ServiceNow instance details
+   ```
+   Edit `.env` with your ServiceNow instance details:
+   ```env
+   SERVICENOW_INSTANCE=your-instance.service-now.com
+   SERVICENOW_USERNAME=your-username
+   SERVICENOW_PASSWORD=your-password
    ```
 
 4. **Build the project**
@@ -49,149 +63,97 @@ A comprehensive Model Context Protocol (MCP) server that enables natural languag
    npm run build
    ```
 
-## ⚙️ Configuration
+5. **Configure Claude Desktop**
+   Add to your Claude Desktop configuration:
+   ```json
+   {
+     "mcpServers": {
+       "servicenow": {
+         "command": "node",
+         "args": ["path/to/servicenow-consultancy/dist/simple-index.js"]
+       }
+     }
+   }
+   ```
 
-### Environment Variables
+## 📖 Usage
 
-Create a `.env` file with the following variables:
+### Basic Commands
 
-```bash
-# ServiceNow Instance Configuration
-SERVICENOW_INSTANCE_URL=https://your-instance.service-now.com
-SERVICENOW_USERNAME=your-username
-SERVICENOW_PASSWORD=your-password
-
-# OAuth2 Configuration (alternative to username/password)
-SERVICENOW_CLIENT_ID=your-client-id
-SERVICENOW_CLIENT_SECRET=your-client-secret
-
-# Update Set Configuration
-UPDATE_SET_PREFIX=CUSTOM
-DEFAULT_APPLICATION_SCOPE=global
-
-# Logging Configuration
-LOG_LEVEL=info
-
-# MCP Server Configuration
-MCP_SERVER_NAME=servicenow-nlp
-MCP_SERVER_VERSION=1.0.0
+```natural
+"Show me all open incidents assigned to me"
+"Create a new incident for database connection issues"
+"Update incident INC0010234 with a work note"
+"Search knowledge base for password reset procedures"
+"List all active change requests scheduled for this week"
 ```
 
-## 🚀 Usage
+### Advanced Operations
 
-### Starting the Server
-
-```bash
-# Basic usage with environment variables
-npm start
-
-# Development mode
-npm run dev
+```natural
+"Create a catalog item request for new laptop with 16GB RAM"
+"Generate a report of all P1 incidents from last month"
+"Update the assignment group for all incidents matching 'network'"
+"Check the approval status of change request CHG0045678"
 ```
 
-### MCP Client Integration
+## 🔧 Development
 
-The server implements the Model Context Protocol and can be used with any MCP-compatible client:
+### Available Scripts
 
-### Claude Desktop Integration
+- `npm run dev` - Start development server with hot reload
+- `npm run build` - Build for production
+- `npm run test` - Run test suite
+- `npm run lint` - Run ESLint
+- `npm run type-check` - Run TypeScript type checking
 
-Add to your Claude Desktop configuration file (`~/Library/Application Support/Claude/claude_desktop_config.json`):
-
-```json
-{
-  "mcpServers": {
-    "servicenow-nlp": {
-      "command": "node",
-      "args": ["/path/to/servicenow-consultancy/dist/simple-index.js"],
-      "env": {
-        "SERVICENOW_INSTANCE_URL": "https://your-instance.service-now.com",
-        "SERVICENOW_USERNAME": "your-username",
-        "SERVICENOW_PASSWORD": "your-password",
-        "UPDATE_SET_PREFIX": "CUSTOM",
-        "DEFAULT_APPLICATION_SCOPE": "global",
-        "LOG_LEVEL": "info"
-      }
-    }
-  }
-}
-```
-
-### Available Tools
-
-1. **test-connection**: Test connection to ServiceNow instance
-2. **create-catalog-item**: Create ServiceNow catalog items with natural language
-
-## 🧪 Testing
-
-### Running Tests
-
-```bash
-# Run all tests with coverage
-npm test
-
-# Development testing
-npm run dev
-```
-
-## 🏗️ Architecture
+### Project Structure
 
 ```
-src/
-├── simple-index.ts      # Main entry point
-├── simple-server.ts     # MCP server implementation
-├── services/
-│   └── servicenow-api.ts # ServiceNow API service
-├── types/
-│   ├── servicenow.ts    # ServiceNow type definitions
-│   └── mcp.ts          # MCP tool schemas
-└── utils/
-    ├── simple-config.ts # Configuration management
-    └── simple-logger.ts # Logging utilities
+servicenow-consultancy/
+├── src/
+│   ├── services/      # ServiceNow API integrations
+│   ├── types/         # TypeScript type definitions
+│   ├── utils/         # Utility functions
+│   ├── simple-index.ts    # MCP server entry point
+│   └── simple-server.ts   # Express server for testing
+├── dist/              # Compiled JavaScript
+├── tests/             # Test files
+└── docs/              # Documentation
 ```
-
-## 🔒 Security
-
-- Sensitive data sanitization in logs
-- Secure credential handling
-- Rate limiting to prevent API abuse
-- Input validation and sanitization
-- Error message sanitization
 
 ## 🤝 Contributing
 
+We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
+### Development Workflow
+
 1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests for new functionality
-5. Ensure all tests pass
-6. Submit a pull request
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
 ## 📝 License
 
-MIT License - see LICENSE file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🆘 Support
+## 🙏 Acknowledgments
 
-- Check the documentation in the `src/` directories
-- Review test files for usage examples
-- Check logs for detailed error information
-- Open issues for bugs or feature requests
+- Built with the [Model Context Protocol](https://github.com/anthropics/mcp)
+- Powered by [ServiceNow REST APIs](https://developer.servicenow.com/dev.do)
+- TypeScript and Node.js ecosystem
 
-## 🗂️ ServiceNow Compatibility
+## 📞 Support
 
-### Supported Versions
-- Washington (WAS)
-- Xanadu (XAN)
-- Yokohama (YOK)
+- **Issues**: [GitHub Issues](https://github.com/pflantzdog27/servicenow-mcp-consultancy/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/pflantzdog27/servicenow-mcp-consultancy/discussions)
 
-### Supported Modules
-- Service Portal
-- IT Service Management (ITSM)
-- HR Service Delivery (HRSD)
-- Financial Management
-- Customer Service Management (CSM)
+## 🗺️ Roadmap
 
-### Update Set Management
-- Automatic creation with naming convention: `PREFIX_YYYY_MM_DD_Description`
-- Application scope-aware operations
-- Proper dependency handling
+- [ ] GraphQL API support
+- [ ] Advanced workflow designer integration
+- [ ] Multi-instance management
+- [ ] Performance analytics dashboard
+- [ ] Enhanced security features
+- [ ] Plugin marketplace
