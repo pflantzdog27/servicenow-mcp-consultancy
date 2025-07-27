@@ -1,12 +1,15 @@
 import axios, { AxiosInstance } from 'axios';
 import { ServiceNowConfig, ServiceNowApiResponse } from '../types/servicenow.js';
+import { SimpleLogger } from '../utils/simple-logger.js';
 
 export class ServiceNowApiService {
   private client: AxiosInstance;
   private config: ServiceNowConfig;
+  private logger?: SimpleLogger;
 
-  constructor(config: ServiceNowConfig) {
+  constructor(config: ServiceNowConfig, logger?: SimpleLogger) {
     this.config = config;
+    this.logger = logger;
     
     this.client = axios.create({
       baseURL: config.instanceUrl,
@@ -29,7 +32,7 @@ export class ServiceNowApiService {
     // Add request/response interceptors for logging
     this.client.interceptors.request.use(
       (config) => {
-        console.log(`info: API Request`, {
+        this.logger?.debug('API Request', {
           method: config.method?.toUpperCase(),
           url: config.url,
           headers: {
@@ -45,7 +48,7 @@ export class ServiceNowApiService {
 
     this.client.interceptors.response.use(
       (response) => {
-        console.log(`info: API Response`, {
+        this.logger?.debug('API Response', {
           status: response.status,
           url: response.config.url,
           service: 'servicenow-api',
@@ -54,7 +57,7 @@ export class ServiceNowApiService {
         return response;
       },
       (error) => {
-        console.log(`error: API Error ${error.message}`, {
+        this.logger?.error(`API Error ${error.message}`, {
           status: error.response?.status,
           url: error.config?.url,
           response: error.response?.data,
@@ -68,7 +71,7 @@ export class ServiceNowApiService {
 
   async authenticate(): Promise<void> {
     // For basic auth, no explicit authentication needed
-    console.log(`info: Using Basic authentication, no token required`, {
+    this.logger?.info('Using Basic authentication, no token required', {
       service: 'servicenow-api',
       timestamp: new Date().toISOString()
     });
@@ -105,7 +108,7 @@ export class ServiceNowApiService {
   async setCurrentUpdateSet(sysId: string): Promise<void> {
     // This would normally set the current update set
     // For now, we'll skip this as it requires special API permissions
-    console.log(`info: Would set current update set to ${sysId}`, {
+    this.logger?.info(`Would set current update set to ${sysId}`, {
       service: 'servicenow-api',
       timestamp: new Date().toISOString()
     });

@@ -91,7 +91,7 @@ export class SimpleServiceNowMCPServer {
         clientSecret: this.config.servicenow.clientSecret,
         updateSetPrefix: this.config.servicenow.updateSetPrefix,
         defaultScope: this.config.servicenow.defaultScope,
-      });
+      }, this.logger);
 
       // Test authentication
       await this.serviceNowApi.authenticate();
@@ -211,6 +211,7 @@ export class SimpleServiceNowMCPServer {
   async start() {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
-    this.logger.info(`ServiceNow MCP Server started successfully`);
+    // Logger output is redirected to stderr in MCP mode
+    this.logger.debug(`ServiceNow MCP Server started successfully`);
   }
 }

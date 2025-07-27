@@ -15,18 +15,49 @@ export function createSimpleLogger(level: string = 'info'): SimpleLogger {
     return `[${timestamp}] ${level.toUpperCase()}: ${message}${metaStr}`;
   };
 
+  // Check if running in MCP mode (when stdout is used for protocol communication)
+  const isMCPMode = process.env.MCP_MODE === 'true' || process.argv.includes('--mcp');
+
   return {
     error: (message: string, meta?: any) => {
-      if (currentLevel >= 0) console.error(formatMessage('error', message, meta));
+      if (currentLevel >= 0) {
+        const msg = formatMessage('error', message, meta);
+        if (isMCPMode) {
+          process.stderr.write(msg + '\n');
+        } else {
+          console.error(msg);
+        }
+      }
     },
     warn: (message: string, meta?: any) => {
-      if (currentLevel >= 1) console.warn(formatMessage('warn', message, meta));
+      if (currentLevel >= 1) {
+        const msg = formatMessage('warn', message, meta);
+        if (isMCPMode) {
+          process.stderr.write(msg + '\n');
+        } else {
+          console.warn(msg);
+        }
+      }
     },
     info: (message: string, meta?: any) => {
-      if (currentLevel >= 2) console.log(formatMessage('info', message, meta));
+      if (currentLevel >= 2) {
+        const msg = formatMessage('info', message, meta);
+        if (isMCPMode) {
+          process.stderr.write(msg + '\n');
+        } else {
+          console.log(msg);
+        }
+      }
     },
     debug: (message: string, meta?: any) => {
-      if (currentLevel >= 3) console.log(formatMessage('debug', message, meta));
+      if (currentLevel >= 3) {
+        const msg = formatMessage('debug', message, meta);
+        if (isMCPMode) {
+          process.stderr.write(msg + '\n');
+        } else {
+          console.log(msg);
+        }
+      }
     },
   };
 }
