@@ -37,6 +37,20 @@ export class SimpleServiceNowMCPServer {
             },
           },
           {
+            name: 'query-records',
+            description: 'Query ServiceNow table records',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                table: { type: 'string', description: 'Table name (e.g., incident, problem, change_request)' },
+                query: { type: 'string', description: 'Encoded query string (e.g., active=true^state=1)' },
+                limit: { type: 'number', description: 'Maximum number of records to return', default: 10 },
+                fields: { type: 'string', description: 'Comma-separated list of fields to return (optional)' }
+              },
+              required: ['table'],
+            },
+          },
+          {
             name: 'create-catalog-item',
             description: 'Create a ServiceNow catalog item using natural language',
             inputSchema: {
@@ -111,9 +125,87 @@ export class SimpleServiceNowMCPServer {
                 conditions: { type: 'string', description: 'Condition script or encoded query' },
                 short_description: { type: 'string', description: 'Description' },
                 on_load: { type: 'boolean', description: 'Run on load', default: true },
-                catalog_item: { type: 'string', description: 'Catalog item sys_id if applicable' }
+                catalog_item: { type: 'string', description: 'Catalog item sys_id if applicable' },
+                script_true: { type: 'string', description: 'Script to execute when condition is true' },
+                script_false: { type: 'string', description: 'Script to execute when condition is false' }
               },
               required: ['name', 'table', 'conditions'],
+            },
+          },
+          {
+            name: 'create-script-include',
+            description: 'Create a Script Include for reusable server-side JavaScript functions',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                name: { type: 'string', description: 'Script Include name' },
+                script: { type: 'string', description: 'JavaScript code' },
+                description: { type: 'string', description: 'Description' },
+                application_scope: { type: 'string', description: 'Application scope', default: 'global' },
+                api_name: { type: 'string', description: 'API name (defaults to name)' },
+                access: { type: 'string', description: 'Access level (public, package_private, private)', default: 'package_private' },
+                active: { type: 'boolean', description: 'Active status', default: true }
+              },
+              required: ['name', 'script'],
+            },
+          },
+          {
+            name: 'create-scheduled-job',
+            description: 'Create a Scheduled Job for automated script execution',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                name: { type: 'string', description: 'Scheduled job name' },
+                script: { type: 'string', description: 'JavaScript code to execute' },
+                description: { type: 'string', description: 'Description' },
+                run_period: { type: 'string', description: 'Run period (daily, weekly, monthly, etc.)', default: 'daily' },
+                run_time: { type: 'string', description: 'Run time (HH:MM:SS format)', default: '00:00:00' },
+                run_dayofweek: { type: 'string', description: 'Day of week for weekly jobs (1-7)' },
+                run_dayofmonth: { type: 'string', description: 'Day of month for monthly jobs (1-31)' },
+                active: { type: 'boolean', description: 'Active status', default: true },
+                conditional: { type: 'boolean', description: 'Use conditional execution', default: false },
+                condition: { type: 'string', description: 'Condition script for conditional execution' }
+              },
+              required: ['name', 'script'],
+            },
+          },
+          {
+            name: 'create-email-notification',
+            description: 'Create an Email Notification for automated email sending',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                name: { type: 'string', description: 'Email notification name' },
+                table: { type: 'string', description: 'Target table' },
+                event: { type: 'string', description: 'Event that triggers the notification (insert, update, delete)' },
+                subject: { type: 'string', description: 'Email subject line' },
+                message: { type: 'string', description: 'Email message body' },
+                recipients: { type: 'string', description: 'Recipient email addresses or field names' },
+                cc_list: { type: 'string', description: 'CC email addresses' },
+                from: { type: 'string', description: 'From email address' },
+                active: { type: 'boolean', description: 'Active status', default: true },
+                advanced_condition: { type: 'string', description: 'Advanced condition script' },
+                weight: { type: 'number', description: 'Execution order weight', default: 0 }
+              },
+              required: ['name', 'table', 'event', 'subject', 'message'],
+            },
+          },
+          {
+            name: 'create-catalog-client-script',
+            description: 'Create a Catalog Client Script for catalog item form behavior',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                name: { type: 'string', description: 'Client script name' },
+                catalog_item: { type: 'string', description: 'Catalog item sys_id' },
+                type: { type: 'string', description: 'Script type (onLoad, onChange, onSubmit, onCellEdit)' },
+                script: { type: 'string', description: 'JavaScript code' },
+                field: { type: 'string', description: 'Field name for onChange scripts' },
+                description: { type: 'string', description: 'Description' },
+                active: { type: 'boolean', description: 'Active status', default: true },
+                applies_to: { type: 'string', description: 'Where the script applies', default: 'catalog' }
+              },
+              required: ['name', 'catalog_item', 'type', 'script'],
             },
           },
           {
@@ -209,6 +301,54 @@ export class SimpleServiceNowMCPServer {
               },
             },
           },
+          {
+            name: 'create-update-set',
+            description: 'Create a new update set for tracking changes',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                name: { type: 'string', description: 'Update set name' },
+                description: { type: 'string', description: 'Update set description' }
+              },
+              required: ['name', 'description'],
+            },
+          },
+          {
+            name: 'set-current-update-set',
+            description: 'Set the current update set for capturing changes',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                update_set_id: { type: 'string', description: 'Update set sys_id' }
+              },
+              required: ['update_set_id'],
+            },
+          },
+          {
+            name: 'create-application-scope',
+            description: 'Create a new application scope',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                name: { type: 'string', description: 'Application name' },
+                scope: { type: 'string', description: 'Application scope identifier' },
+                short_description: { type: 'string', description: 'Short description' },
+                version: { type: 'string', description: 'Version number', default: '1.0.0' }
+              },
+              required: ['name', 'scope', 'short_description'],
+            },
+          },
+          {
+            name: 'set-application-scope',
+            description: 'Set the current application scope for development',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                scope: { type: 'string', description: 'Application scope to set as current' }
+              },
+              required: ['scope'],
+            },
+          },
         ],
       };
     });
@@ -221,6 +361,8 @@ export class SimpleServiceNowMCPServer {
         switch (name) {
           case 'test-connection':
             return await this.testConnection();
+          case 'query-records':
+            return await this.queryRecords(args as any);
           case 'create-catalog-item':
             return await this.createCatalogItem((args?.command as string) || '');
           case 'create-record-producer':
@@ -231,6 +373,14 @@ export class SimpleServiceNowMCPServer {
             return await this.createVariableSet(args as any);
           case 'create-ui-policy':
             return await this.createUIPolicy(args as any);
+          case 'create-script-include':
+            return await this.createScriptInclude(args as any);
+          case 'create-scheduled-job':
+            return await this.createScheduledJob(args as any);
+          case 'create-email-notification':
+            return await this.createEmailNotification(args as any);
+          case 'create-catalog-client-script':
+            return await this.createCatalogClientScript(args as any);
           case 'create-ui-policy-action':
             return await this.createUIPolicyAction(args as any);
           case 'create-client-script':
@@ -243,6 +393,14 @@ export class SimpleServiceNowMCPServer {
             return await this.createAssignmentGroup(args as any);
           case 'implement-invoice-status-inquiry':
             return await this.implementInvoiceStatusInquiry(args as any);
+          case 'create-update-set':
+            return await this.createUpdateSet(args as any);
+          case 'set-current-update-set':
+            return await this.setCurrentUpdateSet(args as any);
+          case 'create-application-scope':
+            return await this.createApplicationScope(args as any);
+          case 'set-application-scope':
+            return await this.setApplicationScope(args as any);
           default:
             throw new Error(`Unknown tool: ${name}`);
         }
@@ -299,6 +457,61 @@ export class SimpleServiceNowMCPServer {
           {
             type: 'text',
             text: `❌ Failed to connect to ServiceNow: ${(error as Error).message}`,
+          },
+        ],
+      };
+    }
+  }
+
+  async queryRecords(args: any) {
+    try {
+      const api = await this.getServiceNowApi();
+      const { table, query, limit = 10, fields } = args;
+      
+      this.logger.info(`Querying table: ${table}`, { query, limit, fields });
+      
+      // Build query parameters
+      let queryString = query || '';
+      if (limit) {
+        queryString += `^ORDERBYDESCsys_created_on`;
+      }
+      
+      const records = await api.getRecords(table, queryString);
+      
+      // Limit results
+      const limitedRecords = records.slice(0, limit);
+      
+      // Filter fields if specified
+      let displayRecords = limitedRecords;
+      if (fields) {
+        const fieldList = fields.split(',').map((f: string) => f.trim());
+        displayRecords = limitedRecords.map(record => {
+          const filtered: any = {};
+          fieldList.forEach((field: string) => {
+            if (record[field] !== undefined) {
+              filtered[field] = record[field];
+            }
+          });
+          return filtered;
+        });
+      }
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `✅ Found ${records.length} record(s) in table '${table}'\n` +
+                  `Showing first ${limitedRecords.length} records:\n\n` +
+                  JSON.stringify(displayRecords, null, 2),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `❌ Failed to query records: ${(error as Error).message}`,
           },
         ],
       };
@@ -524,14 +737,12 @@ export class SimpleServiceNowMCPServer {
     try {
       const api = await this.getServiceNowApi();
       
-      const uiPolicy = await api.createRecord('sys_ui_policy', {
-        short_description: args.name,
-        table: args.table,
-        conditions: args.conditions,
-        description: args.short_description || '',
-        active: true,
-        on_load: args.on_load !== false,
-        catalog_item: args.catalog_item || ''
+      const uiPolicy = await api.createUIPolicy(args.table, args.name, args.conditions, {
+        description: args.short_description,
+        on_load: args.on_load,
+        catalog_item: args.catalog_item,
+        script_true: args.script_true,
+        script_false: args.script_false
       });
 
       return {
@@ -551,6 +762,167 @@ export class SimpleServiceNowMCPServer {
           {
             type: 'text',
             text: `❌ Failed to create UI Policy: ${(error as Error).message}`,
+          },
+        ],
+      };
+    }
+  }
+
+  async createScriptInclude(args: any) {
+    try {
+      const api = await this.getServiceNowApi();
+      
+      const scriptInclude = await api.createScriptInclude({
+        name: args.name,
+        script: args.script,
+        description: args.description,
+        application_scope: args.application_scope,
+        api_name: args.api_name,
+        access: args.access,
+        active: args.active
+      });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `✅ Successfully created Script Include:\n` +
+                  `Name: ${args.name}\n` +
+                  `API Name: ${args.api_name || args.name}\n` +
+                  `Access: ${args.access || 'package_private'}\n` +
+                  `ID: ${(scriptInclude as any).sys_id}`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `❌ Failed to create Script Include: ${(error as Error).message}`,
+          },
+        ],
+      };
+    }
+  }
+
+  async createScheduledJob(args: any) {
+    try {
+      const api = await this.getServiceNowApi();
+      
+      const scheduledJob = await api.createScheduledJob({
+        name: args.name,
+        script: args.script,
+        description: args.description,
+        run_period: args.run_period,
+        run_time: args.run_time,
+        run_dayofweek: args.run_dayofweek,
+        run_dayofmonth: args.run_dayofmonth,
+        active: args.active,
+        conditional: args.conditional,
+        condition: args.condition
+      });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `✅ Successfully created Scheduled Job:\n` +
+                  `Name: ${args.name}\n` +
+                  `Run Period: ${args.run_period || 'daily'}\n` +
+                  `Run Time: ${args.run_time || '00:00:00'}\n` +
+                  `ID: ${(scheduledJob as any).sys_id}`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `❌ Failed to create Scheduled Job: ${(error as Error).message}`,
+          },
+        ],
+      };
+    }
+  }
+
+  async createEmailNotification(args: any) {
+    try {
+      const api = await this.getServiceNowApi();
+      
+      const emailNotification = await api.createEmailNotification({
+        name: args.name,
+        table: args.table,
+        event: args.event,
+        subject: args.subject,
+        message: args.message,
+        recipients: args.recipients,
+        cc_list: args.cc_list,
+        from: args.from,
+        active: args.active,
+        advanced_condition: args.advanced_condition,
+        weight: args.weight
+      });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `✅ Successfully created Email Notification:\n` +
+                  `Name: ${args.name}\n` +
+                  `Table: ${args.table}\n` +
+                  `Event: ${args.event}\n` +
+                  `Subject: ${args.subject}\n` +
+                  `ID: ${(emailNotification as any).sys_id}`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `❌ Failed to create Email Notification: ${(error as Error).message}`,
+          },
+        ],
+      };
+    }
+  }
+
+  async createCatalogClientScript(args: any) {
+    try {
+      const api = await this.getServiceNowApi();
+      
+      const catalogClientScript = await api.createCatalogClientScript({
+        name: args.name,
+        catalog_item: args.catalog_item,
+        type: args.type,
+        script: args.script,
+        field: args.field,
+        description: args.description,
+        active: args.active,
+        applies_to: args.applies_to
+      });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `✅ Successfully created Catalog Client Script:\n` +
+                  `Name: ${args.name}\n` +
+                  `Type: ${args.type}\n` +
+                  `Catalog Item: ${args.catalog_item}\n` +
+                  `ID: ${(catalogClientScript as any).sys_id}`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `❌ Failed to create Catalog Client Script: ${(error as Error).message}`,
           },
         ],
       };
@@ -968,6 +1340,126 @@ export class SimpleServiceNowMCPServer {
           {
             type: 'text',
             text: `❌ Failed to implement Invoice Status Inquiry: ${(error as Error).message}`,
+          },
+        ],
+      };
+    }
+  }
+
+  async createUpdateSet(args: any) {
+    try {
+      const api = await this.getServiceNowApi();
+      const { name, description } = args;
+      
+      const updateSet = await api.createUpdateSet(name, description);
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `✅ Successfully created update set:\n` +
+                  `Name: ${updateSet.name}\n` +
+                  `Description: ${updateSet.description}\n` +
+                  `State: ${updateSet.state}\n` +
+                  `Sys ID: ${updateSet.sys_id}`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `❌ Failed to create update set: ${(error as Error).message}`,
+          },
+        ],
+      };
+    }
+  }
+
+  async setCurrentUpdateSet(args: any) {
+    try {
+      const api = await this.getServiceNowApi();
+      const { update_set_id } = args;
+      
+      await api.setCurrentUpdateSet(update_set_id);
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `✅ Current update set has been set to: ${update_set_id}\n` +
+                  `Note: This operation may require additional permissions in your ServiceNow instance.`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `❌ Failed to set current update set: ${(error as Error).message}`,
+          },
+        ],
+      };
+    }
+  }
+
+  async createApplicationScope(args: any) {
+    try {
+      const api = await this.getServiceNowApi();
+      const { name, scope, short_description, version = '1.0.0' } = args;
+      
+      const application = await api.createApplicationScope(name, scope, short_description, version);
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `✅ Successfully created application scope:\n` +
+                  `Name: ${application.name}\n` +
+                  `Scope: ${application.scope}\n` +
+                  `Description: ${application.short_description}\n` +
+                  `Version: ${application.version}\n` +
+                  `Sys ID: ${application.sys_id}`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `❌ Failed to create application scope: ${(error as Error).message}`,
+          },
+        ],
+      };
+    }
+  }
+
+  async setApplicationScope(args: any) {
+    try {
+      const api = await this.getServiceNowApi();
+      const { scope } = args;
+      
+      await api.setApplicationScope(scope);
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `✅ Application scope set to: ${scope}\n` +
+                  `Future development operations will be performed in this scope.\n` +
+                  `Note: This operation may require additional permissions in your ServiceNow instance.`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `❌ Failed to set application scope: ${(error as Error).message}`,
           },
         ],
       };
