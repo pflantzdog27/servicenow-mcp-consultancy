@@ -24,8 +24,24 @@ console.error = (...args: any[]) => {
 
 async function main() {
   try {
+    // Add raw stdin logging to debug communication issues
+    process.stderr.write('[MCP-SERVER] Starting server and setting up stdin logging...\n');
+    
+    process.stdin.on('data', (chunk) => {
+      process.stderr.write(`[MCP-SERVER] Raw stdin received (${chunk.length} bytes): ${JSON.stringify(chunk.toString())}\n`);
+    });
+    
+    process.stdin.on('end', () => {
+      process.stderr.write('[MCP-SERVER] stdin stream ended\n');
+    });
+    
+    process.stdin.on('error', (error) => {
+      process.stderr.write(`[MCP-SERVER] stdin error: ${error.message}\n`);
+    });
+    
     const server = new SimpleServiceNowMCPServer();
     await server.start();
+    process.stderr.write('[MCP-SERVER] Server started successfully, waiting for messages...\n');
   } catch (error) {
     process.stderr.write(`Failed to start ServiceNow MCP Server: ${(error as Error).message}\n`);
     process.exit(1);

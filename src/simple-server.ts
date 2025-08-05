@@ -1,6 +1,6 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { CallToolRequestSchema, ListToolsRequestSchema, InitializeRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import { ServiceNowApiService } from './services/servicenow-api.js';
 import { getConfig, SimpleConfig } from './utils/simple-config.js';
 import { createSimpleLogger } from './utils/simple-logger.js';
@@ -10,6 +10,7 @@ export class SimpleServiceNowMCPServer {
   private config: SimpleConfig;
   private logger: any;
   private serviceNowApi: ServiceNowApiService | null = null;
+  private currentUpdateSetId: string | null = null;
 
   constructor() {
     this.config = getConfig();
@@ -20,7 +21,26 @@ export class SimpleServiceNowMCPServer {
       version: this.config.server.version,
     });
 
+    this.setupInitialize();
     this.setupTools();
+  }
+
+  private setupInitialize() {
+    // Override the default initialize handler to include proper capabilities
+    this.server.setRequestHandler(InitializeRequestSchema, async (request) => {
+      return {
+        protocolVersion: "2024-11-05",
+        capabilities: {
+          tools: {
+            list: true
+          }
+        },
+        serverInfo: {
+          name: this.config.server.name,
+          version: this.config.server.version,
+        }
+      };
+    });
   }
 
   private setupTools() {
@@ -48,6 +68,32 @@ export class SimpleServiceNowMCPServer {
                 fields: { type: 'string', description: 'Comma-separated list of fields to return (optional)' }
               },
               required: ['table'],
+            },
+          },
+          {
+            name: 'create-record',
+            description: 'Create a new record in any ServiceNow table (incidents, problems, change requests, etc.)',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                table: { type: 'string', description: 'Table name (e.g., incident, problem, change_request, task)' },
+                fields: { 
+                  type: 'object', 
+                  description: 'Field values for the new record as key-value pairs',
+                  additionalProperties: true,
+                  examples: [
+                    {
+                      short_description: 'Email server down',
+                      priority: '2',
+                      urgency: '2',
+                      impact: '2',
+                      category: 'software',
+                      subcategory: 'email'
+                    }
+                  ]
+                }
+              },
+              required: ['table', 'fields'],
             },
           },
           {
@@ -88,12 +134,14 @@ export class SimpleServiceNowMCPServer {
               properties: {
                 name: { type: 'string', description: 'Variable name' },
                 question_text: { type: 'string', description: 'Display label' },
-                type: { type: 'string', description: 'Variable type (string, reference, choice, etc.)' },
+                type: { type: 'string', description: 'Variable type (string, multi_line_text, reference, choice, boolean, integer, date, date_time, etc.)' },
                 mandatory: { type: 'boolean', description: 'Is mandatory', default: false },
                 reference_table: { type: 'string', description: 'Reference table for reference type variables' },
+                reference_qual: { type: 'string', description: 'Reference qualifier for reference type variables' },
                 choices: { type: 'string', description: 'Choices for choice variables (comma-separated)' },
                 default_value: { type: 'string', description: 'Default value' },
                 max_length: { type: 'number', description: 'Maximum length for string fields' },
+                order: { type: 'number', description: 'Display order', default: 100 },
                 catalog_item: { type: 'string', description: 'Parent catalog item sys_id' }
               },
               required: ['name', 'question_text', 'type', 'catalog_item'],
@@ -130,6 +178,50 @@ export class SimpleServiceNowMCPServer {
                 script_false: { type: 'string', description: 'Script to execute when condition is false' }
               },
               required: ['name', 'table', 'conditions'],
+            },
+          },
+          {
+            name: 'create-catalog-ui-policy',
+            description: 'Create a UI policy specifically for catalog items that controls variable behavior',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                catalog_item: { type: 'string', description: 'sys_id of catalog item' },
+                variable_set: { type: 'string', description: 'sys_id of variable set' },
+                applies_to: { type: 'string', description: "'A Catalog Item' or 'A Variable Set'", default: 'A Catalog Item' },
+                name: { type: 'string', description: 'Policy name' },
+                short_description: { type: 'string', description: 'Brief description' },
+                active: { type: 'boolean', description: 'Active status', default: true },
+                catalog_conditions: { type: 'string', description: 'Conditions using variable names (e.g. equipment_type=Laptop)' },
+                applies_on_catalog_item_view: { type: 'boolean', description: 'Apply in catalog item view', default: true },
+                applies_on_requested_items: { type: 'boolean', description: 'Apply on requested items', default: false },
+                applies_on_catalog_tasks: { type: 'boolean', description: 'Apply on catalog tasks', default: false },
+                applies_on_target_record: { type: 'boolean', description: 'Apply on target record', default: false },
+                on_load: { type: 'boolean', description: 'Run on form load', default: true },
+                reverse_if_false: { type: 'boolean', description: 'Reverse if conditions are false', default: false },
+                order: { type: 'number', description: 'Execution order', default: 100 }
+              },
+              required: ['name'],
+            },
+          },
+          {
+            name: 'create-catalog-ui-policy-action',
+            description: 'Create actions for catalog UI policies that control specific variable behavior',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                catalog_ui_policy: { type: 'string', description: 'sys_id of catalog UI policy' },
+                variable_name: { type: 'string', description: 'Name of catalog variable to control' },
+                order: { type: 'number', description: 'Execution order', default: 100 },
+                mandatory: { type: 'string', description: "'true', 'false', or 'leave_alone'" },
+                visible: { type: 'string', description: "'true', 'false', or 'leave_alone'" },
+                read_only: { type: 'string', description: "'true', 'false', or 'leave_alone'" },
+                value_action: { type: 'string', description: "'leave_alone', 'set_value', or 'clear_value'" },
+                value: { type: 'string', description: "Value to set when value_action is 'set_value'" },
+                field_message_type: { type: 'string', description: "'info', 'warning', 'error', or 'none'" },
+                field_message: { type: 'string', description: 'Message to display' }
+              },
+              required: ['catalog_ui_policy', 'variable_name'],
             },
           },
           {
@@ -247,15 +339,51 @@ export class SimpleServiceNowMCPServer {
               type: 'object',
               properties: {
                 name: { type: 'string', description: 'Business Rule name' },
-                table: { type: 'string', description: 'Target table' },
-                when: { type: 'string', description: 'When to run (before, after, async, display)' },
-                operation: { type: 'string', description: 'Operations (insert, update, delete, query)' },
-                script: { type: 'string', description: 'Server-side JavaScript code' },
-                description: { type: 'string', description: 'Description' },
-                order: { type: 'number', description: 'Execution order', default: 100 },
-                condition: { type: 'string', description: 'Condition script' }
+                table: { type: 'string', description: 'Target table name (e.g., incident, problem, change_request)' },
+                when: { type: 'string', description: 'When to run: before, after, async, display', enum: ['before', 'after', 'async', 'display'] },
+                operation: { 
+                  type: 'array', 
+                  description: 'Database operations to trigger on',
+                  items: { type: 'string', enum: ['insert', 'update', 'delete', 'query'] },
+                  default: ['insert', 'update']
+                },
+                script: { type: 'string', description: 'JavaScript code wrapped in function(current, previous) {}' },
+                description: { type: 'string', description: 'Description of what the business rule does' },
+                order: { type: 'number', description: 'Execution order (lower numbers run first)', default: 100 },
+                condition: { type: 'string', description: 'JavaScript condition that must return true' },
+                filter_condition: { type: 'string', description: 'Encoded query string for filtering records' },
+                advanced: { type: 'boolean', description: 'Enable advanced options', default: false },
+                active: { type: 'boolean', description: 'Whether the rule is active', default: true },
+                role_conditions: { type: 'string', description: 'Comma-separated list of roles' }
               },
               required: ['name', 'table', 'when', 'script'],
+            },
+          },
+          {
+            name: 'update-business-rule',
+            description: 'Update an existing Business Rule',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                sys_id: { type: 'string', description: 'Business Rule sys_id to update' },
+                name: { type: 'string', description: 'Business Rule name' },
+                table: { type: 'string', description: 'Target table name' },
+                when: { type: 'string', description: 'When to run: before, after, async, display', enum: ['before', 'after', 'async', 'display'] },
+                operation: { 
+                  type: 'array', 
+                  description: 'Database operations to trigger on',
+                  items: { type: 'string', enum: ['insert', 'update', 'delete', 'query'] }
+                },
+                script: { type: 'string', description: 'JavaScript code wrapped in function(current, previous) {}' },
+                description: { type: 'string', description: 'Description of what the business rule does' },
+                order: { type: 'number', description: 'Execution order (lower numbers run first)' },
+                condition: { type: 'string', description: 'JavaScript condition that must return true' },
+                filter_condition: { type: 'string', description: 'Encoded query string for filtering records' },
+                advanced: { type: 'boolean', description: 'Enable advanced options' },
+                active: { type: 'boolean', description: 'Whether the rule is active' },
+                role_conditions: { type: 'string', description: 'Comma-separated list of roles' }
+              },
+              required: ['sys_id'],
             },
           },
           {
@@ -349,20 +477,118 @@ export class SimpleServiceNowMCPServer {
               required: ['scope'],
             },
           },
+          {
+            name: 'create-flow',
+            description: 'Create a Flow Designer flow',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                name: { type: 'string', description: 'Flow name' },
+                description: { type: 'string', description: 'Flow description' },
+                scope: { type: 'string', description: 'Application scope', default: 'global' },
+                active: { type: 'boolean', description: 'Active status', default: true }
+              },
+              required: ['name'],
+            },
+          },
+          {
+            name: 'create-flow-trigger',
+            description: 'Create a trigger for a Flow Designer flow',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                flow_id: { type: 'string', description: 'Flow sys_id' },
+                type: { type: 'string', description: 'Trigger type (record_created, record_updated, scheduled)' },
+                table: { type: 'string', description: 'Table name for record triggers' },
+                condition: { type: 'string', description: 'Condition for when the trigger fires' }
+              },
+              required: ['flow_id', 'type'],
+            },
+          },
+          {
+            name: 'add-create-record-action',
+            description: 'Add a Create Record action to a flow',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                flow_id: { type: 'string', description: 'Flow sys_id' },
+                table: { type: 'string', description: 'Table to create record in' },
+                field_values: { type: 'object', description: 'Field values for the new record' },
+                order: { type: 'number', description: 'Action execution order' }
+              },
+              required: ['flow_id', 'table', 'field_values', 'order'],
+            },
+          },
+          {
+            name: 'add-send-email-action',
+            description: 'Add a Send Email action to a flow',
+            inputSchema: {
+              type: 'object',
+              properties: {
+                flow_id: { type: 'string', description: 'Flow sys_id' },
+                to: { type: 'string', description: 'Email recipient(s)' },
+                subject: { type: 'string', description: 'Email subject' },
+                body: { type: 'string', description: 'Email body' },
+                order: { type: 'number', description: 'Action execution order' }
+              },
+              required: ['flow_id', 'to', 'subject', 'body', 'order'],
+            },
+          },
+          {
+            name: 'get-current-update-set',
+            description: 'Get the currently tracked update set for this session',
+            inputSchema: {
+              type: 'object',
+              properties: {},
+            },
+          },
         ],
       };
     });
 
     // Handle tool calls
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+      // EXTREME LOGGING - Raw request input
+      console.error('[MCP-RAW-INPUT]', JSON.stringify({
+        timestamp: new Date().toISOString(),
+        rawRequest: request,
+        requestType: typeof request,
+        paramsType: typeof request.params,
+        paramsKeys: Object.keys(request.params || {}),
+        fullRequestJson: JSON.stringify(request, null, 2)
+      }));
+
       const { name, arguments: args } = request.params;
+
+      // EXTREME LOGGING - Extracted parameters
+      console.error('[MCP-EXTRACTED-PARAMS]', JSON.stringify({
+        timestamp: new Date().toISOString(),
+        toolName: name,
+        extractedArgs: args,
+        argsType: typeof args,
+        argsKeys: Object.keys(args || {}),
+        argsJson: JSON.stringify(args, null, 2)
+      }));
 
       try {
         switch (name) {
           case 'test-connection':
+            // EXTREME LOGGING - Test connection specific
+            console.error('[TEST-CONNECTION-ARGS]', JSON.stringify({
+              timestamp: new Date().toISOString(),
+              receivedArgs: args,
+              argsKeys: Object.keys(args || {}),
+              argsType: typeof args,
+              argsIsNull: args === null,
+              argsIsUndefined: args === undefined,
+              argContent: args,
+              message: 'About to call testConnection()'
+            }));
             return await this.testConnection();
           case 'query-records':
             return await this.queryRecords(args as any);
+          case 'create-record':
+            return await this.createRecord(args as any);
           case 'create-catalog-item':
             return await this.createCatalogItem((args?.command as string) || '');
           case 'create-record-producer':
@@ -373,6 +599,10 @@ export class SimpleServiceNowMCPServer {
             return await this.createVariableSet(args as any);
           case 'create-ui-policy':
             return await this.createUIPolicy(args as any);
+          case 'create-catalog-ui-policy':
+            return await this.createCatalogUIPolicy(args as any);
+          case 'create-catalog-ui-policy-action':
+            return await this.createCatalogUIPolicyAction(args as any);
           case 'create-script-include':
             return await this.createScriptInclude(args as any);
           case 'create-scheduled-job':
@@ -387,6 +617,8 @@ export class SimpleServiceNowMCPServer {
             return await this.createClientScript(args as any);
           case 'create-business-rule':
             return await this.createBusinessRule(args as any);
+          case 'update-business-rule':
+            return await this.updateBusinessRule(args as any);
           case 'create-table-field':
             return await this.createTableField(args as any);
           case 'create-assignment-group':
@@ -397,10 +629,20 @@ export class SimpleServiceNowMCPServer {
             return await this.createUpdateSet(args as any);
           case 'set-current-update-set':
             return await this.setCurrentUpdateSet(args as any);
+          case 'get-current-update-set':
+            return await this.getCurrentUpdateSet();
           case 'create-application-scope':
             return await this.createApplicationScope(args as any);
           case 'set-application-scope':
             return await this.setApplicationScope(args as any);
+          case 'create-flow':
+            return await this.createFlow(args as any);
+          case 'create-flow-trigger':
+            return await this.createFlowTrigger(args as any);
+          case 'add-create-record-action':
+            return await this.addCreateRecordAction(args as any);
+          case 'add-send-email-action':
+            return await this.addSendEmailAction(args as any);
           default:
             throw new Error(`Unknown tool: ${name}`);
         }
@@ -518,6 +760,49 @@ export class SimpleServiceNowMCPServer {
     }
   }
 
+  async createRecord(args: any) {
+    try {
+      const api = await this.getServiceNowApi();
+      const { table, fields } = args;
+      
+      if (!table) {
+        throw new Error('Table parameter is required');
+      }
+      
+      if (!fields || typeof fields !== 'object') {
+        throw new Error('Fields parameter is required and must be an object with field values');
+      }
+      
+      this.logger.info(`Creating record in table: ${table}`, { fields });
+      
+      // Add update set to record data if available
+      const recordData = this.addUpdateSetToRecord(fields);
+      const record = await api.createRecord(table, recordData);
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `✅ Successfully created ${table} record:\n` +
+                  `Record ID: ${(record as any).sys_id}\n` +
+                  `Number: ${(record as any).number || 'N/A'}\n` +
+                  `Short Description: ${fields.short_description || 'N/A'}\n` +
+                  `Status: Created successfully`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `❌ Failed to create record: ${(error as Error).message}`,
+          },
+        ],
+      };
+    }
+  }
+
   async createCatalogItem(command: string) {
     try {
       // Simple pattern matching for demo
@@ -604,7 +889,7 @@ export class SimpleServiceNowMCPServer {
     try {
       const api = await this.getServiceNowApi();
       
-      const recordProducer = await api.createRecord('sc_cat_item_producer', {
+      const recordData = this.addUpdateSetToRecord({
         name: args.name,
         short_description: args.short_description,
         table_name: args.table,
@@ -615,6 +900,8 @@ export class SimpleServiceNowMCPServer {
         workflow: '',
         script: `// Record Producer script for ${args.name}\n// Generated by ServiceNow MCP`
       });
+      
+      const recordProducer = await api.createRecord('sc_cat_item_producer', recordData);
 
       return {
         content: [
@@ -643,35 +930,89 @@ export class SimpleServiceNowMCPServer {
     try {
       const api = await this.getServiceNowApi();
       
+      // Validation
+      if (!args.name || !args.question_text || !args.type || !args.catalog_item) {
+        throw new Error('Missing required parameters: name, question_text, type, and catalog_item are required');
+      }
+
+      // Validate reference type has reference_table
+      if (args.type === 'reference' && !args.reference_table) {
+        throw new Error('reference_table is required when type is "reference"');
+      }
+
+      // Validate choice type has choices
+      if (args.type === 'choice' && !args.choices) {
+        throw new Error('choices parameter is required when type is "choice"');
+      }
+      
+      // ServiceNow variable type mappings
+      const variableTypeMap: Record<string, string> = {
+        'string': '6',              // Single Line Text
+        'multi_line_text': '7',     // Multi Line Text
+        'choice': '3',              // Multiple Choice
+        'reference': '8',           // Reference
+        'boolean': '11',            // True/False
+        'integer': '4',             // Numeric Scale
+        'date': '9',                // Date
+        'date_time': '10',          // Date/Time
+        'lookup_select_box': '18',  // Lookup Select Box
+        'select_box': '5',          // Select Box
+        'checkbox': '21',           // CheckBox
+        'macro': '14',              // Macro
+        'ui_page': '17',            // UI Page
+        'wide_single_line': '16'    // Wide Single Line Text
+      };
+
       const variableData: any = {
         name: args.name,
         question_text: args.question_text,
-        type: args.type,
+        type: variableTypeMap[args.type] || '6', // Default to single line text
         mandatory: args.mandatory || false,
         cat_item: args.catalog_item,
-        order: 100
+        order: args.order || 100,
+        active: true
       };
 
-      if (args.reference_table) {
+      // Handle reference fields
+      if (args.type === 'reference' && args.reference_table) {
         variableData.reference = args.reference_table;
+        variableData.reference_qual = args.reference_qual || '';
       }
 
-      if (args.choices) {
-        variableData.lookup_table = '';
-        variableData.lookup_value = '';
-        variableData.lookup_label = '';
-        variableData.question_choices = args.choices;
+      // Handle string and multi-line text length
+      if ((args.type === 'string' || args.type === 'multi_line_text') && args.max_length) {
+        variableData.max_length = args.max_length;
+      } else if (args.type === 'string') {
+        variableData.max_length = 255; // Default for string
+      } else if (args.type === 'multi_line_text') {
+        variableData.max_length = 4000; // Default for multi-line
       }
 
+      // Handle default values
       if (args.default_value) {
         variableData.default_value = args.default_value;
       }
 
-      if (args.max_length) {
-        variableData.max_length = args.max_length;
-      }
+      // Add update set and create the variable
+      const recordDataWithUpdateSet = this.addUpdateSetToRecord(variableData);
+      const variable = await api.createRecord('item_option_new', recordDataWithUpdateSet);
+      const variableSysId = (variable as any).sys_id;
 
-      const variable = await api.createRecord('item_option_new', variableData);
+      // Handle choice variables - create choice records
+      if (args.type === 'choice' && args.choices) {
+        const choiceList = args.choices.split(',');
+        for (let i = 0; i < choiceList.length; i++) {
+          const choice = choiceList[i].trim();
+          const choiceData = this.addUpdateSetToRecord({
+            question: variableSysId,
+            text: choice,
+            value: choice,
+            order: (i + 1) * 100,
+            inactive: false
+          });
+          await api.createRecord('question_choice', choiceData);
+        }
+      }
 
       return {
         content: [
@@ -679,8 +1020,10 @@ export class SimpleServiceNowMCPServer {
             type: 'text',
             text: `✅ Successfully created Variable:\n` +
                   `Name: ${args.name}\n` +
-                  `Type: ${args.type}\n` +
-                  `ID: ${(variable as any).sys_id}`,
+                  `Type: ${args.type} (ServiceNow type: ${variableTypeMap[args.type] || '6'})\n` +
+                  `ID: ${variableSysId}` +
+                  (args.type === 'choice' && args.choices ? `\nChoices: ${args.choices}` : '') +
+                  (args.type === 'reference' && args.reference_table ? `\nReference Table: ${args.reference_table}` : ''),
           },
         ],
       };
@@ -737,6 +1080,26 @@ export class SimpleServiceNowMCPServer {
     try {
       const api = await this.getServiceNowApi();
       
+      // Intelligent detection: If catalog_item is provided, redirect to catalog UI policy
+      if (args.catalog_item && !args.table) {
+        this.logger.warn('Deprecation warning: Using create-ui-policy with catalog_item parameter. Please use create-catalog-ui-policy instead.');
+        
+        // Redirect to catalog UI policy creation
+        return await this.createCatalogUIPolicy({
+          catalog_item: args.catalog_item,
+          name: args.name,
+          catalog_conditions: args.conditions,
+          short_description: args.short_description,
+          on_load: args.on_load,
+          applies_on_catalog_item_view: true
+        });
+      }
+      
+      // Validate that table is provided for regular UI policies
+      if (!args.table) {
+        throw new Error('Table parameter is required for regular UI policies. For catalog items, use create-catalog-ui-policy instead.');
+      }
+      
       const uiPolicy = await api.createUIPolicy(args.table, args.name, args.conditions, {
         description: args.short_description,
         on_load: args.on_load,
@@ -762,6 +1125,97 @@ export class SimpleServiceNowMCPServer {
           {
             type: 'text',
             text: `❌ Failed to create UI Policy: ${(error as Error).message}`,
+          },
+        ],
+      };
+    }
+  }
+
+  async createCatalogUIPolicy(args: any) {
+    try {
+      const api = await this.getServiceNowApi();
+      
+      // Validate that either catalog_item or variable_set is provided
+      if (!args.catalog_item && !args.variable_set) {
+        throw new Error('Either catalog_item or variable_set must be provided');
+      }
+      
+      const catalogUIPolicy = await api.createCatalogUIPolicy({
+        catalog_item: args.catalog_item,
+        variable_set: args.variable_set,
+        applies_to: args.applies_to,
+        name: args.name,
+        short_description: args.short_description,
+        active: args.active,
+        catalog_conditions: args.catalog_conditions,
+        applies_on_catalog_item_view: args.applies_on_catalog_item_view,
+        applies_on_requested_items: args.applies_on_requested_items,
+        applies_on_catalog_tasks: args.applies_on_catalog_tasks,
+        applies_on_target_record: args.applies_on_target_record,
+        on_load: args.on_load,
+        reverse_if_false: args.reverse_if_false,
+        order: args.order
+      });
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `✅ Successfully created Catalog UI Policy:\n` +
+                  `Name: ${args.name}\n` +
+                  `Applies to: ${args.applies_to || 'A Catalog Item'}\n` +
+                  `Catalog Item: ${args.catalog_item || 'N/A'}\n` +
+                  `Variable Set: ${args.variable_set || 'N/A'}\n` +
+                  `ID: ${(catalogUIPolicy as any).sys_id}`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `❌ Failed to create Catalog UI Policy: ${(error as Error).message}`,
+          },
+        ],
+      };
+    }
+  }
+
+  async createCatalogUIPolicyAction(args: any) {
+    try {
+      const api = await this.getServiceNowApi();
+      
+      const action = await api.createCatalogUIPolicyAction({
+        catalog_ui_policy: args.catalog_ui_policy,
+        variable_name: args.variable_name,
+        order: args.order,
+        mandatory: args.mandatory,
+        visible: args.visible,
+        read_only: args.read_only,
+        value_action: args.value_action,
+        value: args.value,
+        field_message_type: args.field_message_type,
+        field_message: args.field_message
+      });
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `✅ Successfully created Catalog UI Policy Action:\n` +
+                  `Variable: ${args.variable_name}\n` +
+                  `Policy: ${args.catalog_ui_policy}\n` +
+                  `ID: ${(action as any).sys_id}`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `❌ Failed to create Catalog UI Policy Action: ${(error as Error).message}`,
           },
         ],
       };
@@ -933,13 +1387,32 @@ export class SimpleServiceNowMCPServer {
     try {
       const api = await this.getServiceNowApi();
       
-      const action = await api.createRecord('sys_ui_policy_action', {
+      // Check if this might be a catalog UI policy action based on field naming
+      if (args.field && args.field.includes('variables.')) {
+        this.logger.warn('Deprecation warning: It appears you are trying to control a catalog variable. Please use create-catalog-ui-policy-action instead.');
+        
+        // Extract variable name from 'variables.variable_name' format
+        const variableName = args.field.replace('variables.', '');
+        
+        // Redirect to catalog UI policy action creation
+        return await this.createCatalogUIPolicyAction({
+          catalog_ui_policy: args.ui_policy,
+          variable_name: variableName,
+          visible: args.visible !== undefined ? (args.visible ? 'true' : 'false') : 'leave_alone',
+          mandatory: args.mandatory !== undefined ? (args.mandatory ? 'true' : 'false') : 'leave_alone',
+          read_only: args.disabled !== undefined ? (args.disabled ? 'true' : 'false') : 'leave_alone'
+        });
+      }
+      
+      const recordData = this.addUpdateSetToRecord({
         ui_policy: args.ui_policy,
         field: args.field,
         visible: args.visible !== undefined ? args.visible : true,
         mandatory: args.mandatory || false,
         disabled: args.disabled || false
       });
+      
+      const action = await api.createRecord('sys_ui_policy_action', recordData);
 
       return {
         content: [
@@ -968,7 +1441,7 @@ export class SimpleServiceNowMCPServer {
     try {
       const api = await this.getServiceNowApi();
       
-      const clientScript = await api.createRecord('sys_script_client', {
+      const recordData = this.addUpdateSetToRecord({
         name: args.name,
         table: args.table,
         type: args.type,
@@ -979,6 +1452,8 @@ export class SimpleServiceNowMCPServer {
         ui_type: args.catalog_item ? '10' : '0', // 10 for catalog, 0 for forms
         cat_item: args.catalog_item || ''
       });
+      
+      const clientScript = await api.createRecord('sys_script_client', recordData);
 
       return {
         content: [
@@ -1008,30 +1483,70 @@ export class SimpleServiceNowMCPServer {
     try {
       const api = await this.getServiceNowApi();
       
-      const businessRule = await api.createRecord('sys_script', {
+      // Validate required fields
+      if (!args.name || !args.table || !args.when || !args.script) {
+        throw new Error('Missing required fields: name, table, when, and script are required');
+      }
+      
+      // Validate 'when' field
+      const validWhenValues = ['before', 'after', 'async', 'display'];
+      if (!validWhenValues.includes(args.when)) {
+        throw new Error(`Invalid 'when' value: ${args.when}. Must be one of: ${validWhenValues.join(', ')}`);
+      }
+      
+      // Validate script structure
+      if (!args.script.includes('function') || !args.script.includes('current')) {
+        this.logger?.warn('Script may not follow proper structure. Should be wrapped in function(current, previous) {}');
+      }
+      
+      // Handle operations - support both array and string formats
+      let operations = args.operation || ['insert', 'update'];
+      if (typeof operations === 'string') {
+        operations = operations.split(',').map((op: string) => op.trim());
+      }
+      
+      const recordData = this.addUpdateSetToRecord({
         name: args.name,
         table: args.table,
         when: args.when,
-        insert: args.operation?.includes('insert') !== false,
-        update: args.operation?.includes('update') || false,
-        delete: args.operation?.includes('delete') || false,
-        query: args.operation?.includes('query') || false,
+        insert: operations.includes('insert'),
+        update: operations.includes('update'),
+        delete: operations.includes('delete'),
+        query: operations.includes('query'),
         script: args.script,
         description: args.description || '',
         order: args.order || 100,
         condition: args.condition || '',
-        active: true
+        filter_condition: args.filter_condition || '',
+        advanced: args.advanced || false,
+        active: args.active !== false,
+        role_conditions: args.role_conditions || ''
       });
-
+      
+      const businessRule = await api.createRecord('sys_script', recordData);
+      
+      // Provide detailed feedback
+      const operationsList = operations.join(', ');
+      const feedback = [
+        `✅ Successfully created Business Rule:`,
+        `Name: ${args.name}`,
+        `Table: ${args.table}`,
+        `When: ${args.when}`,
+        `Operations: ${operationsList}`,
+        `Order: ${args.order || 100}`,
+        `Active: ${args.active !== false}`,
+        `ID: ${(businessRule as any).sys_id}`
+      ];
+      
+      if (args.condition) {
+        feedback.push(`Condition: ${args.condition}`);
+      }
+      
       return {
         content: [
           {
             type: 'text',
-            text: `✅ Successfully created Business Rule:\n` +
-                  `Name: ${args.name}\n` +
-                  `Table: ${args.table}\n` +
-                  `When: ${args.when}\n` +
-                  `ID: ${(businessRule as any).sys_id}`,
+            text: feedback.join('\n'),
           },
         ],
       };
@@ -1072,7 +1587,8 @@ export class SimpleServiceNowMCPServer {
         // Note: Choices need to be created separately in sys_choice table
       }
 
-      const field = await api.createRecord('sys_dictionary', fieldData);
+      const recordDataWithUpdateSet = this.addUpdateSetToRecord(fieldData);
+      const field = await api.createRecord('sys_dictionary', recordDataWithUpdateSet);
 
       return {
         content: [
@@ -1102,12 +1618,14 @@ export class SimpleServiceNowMCPServer {
     try {
       const api = await this.getServiceNowApi();
       
-      const group = await api.createRecord('sys_user_group', {
+      const recordData = this.addUpdateSetToRecord({
         name: args.name,
         description: args.description || '',
         type: args.type || 'itil',
         active: args.active !== false
       });
+      
+      const group = await api.createRecord('sys_user_group', recordData);
 
       return {
         content: [
@@ -1382,14 +1900,25 @@ export class SimpleServiceNowMCPServer {
       const api = await this.getServiceNowApi();
       const { update_set_id } = args;
       
-      await api.setCurrentUpdateSet(update_set_id);
+      // Store locally for direct field setting
+      this.currentUpdateSetId = update_set_id;
+      
+      // Try to set user preference (may fail due to API limitations)
+      try {
+        await api.setCurrentUpdateSet(update_set_id);
+      } catch (prefError) {
+        this.logger?.warn('Failed to set update set preference via API, using direct field assignment', {
+          error: (prefError as Error).message
+        });
+      }
       
       return {
         content: [
           {
             type: 'text',
-            text: `✅ Current update set has been set to: ${update_set_id}\n` +
-                  `Note: This operation may require additional permissions in your ServiceNow instance.`,
+            text: `✅ Update set tracked for this session. All subsequent record creations will be associated with this update set.\n` +
+                  `Update Set ID: ${update_set_id}\n` +
+                  `Note: Due to REST API limitations, we set the sys_update_set field directly on each record rather than changing the session preference.`,
           },
         ],
       };
@@ -1398,7 +1927,7 @@ export class SimpleServiceNowMCPServer {
         content: [
           {
             type: 'text',
-            text: `❌ Failed to set current update set: ${(error as Error).message}`,
+            text: `❌ Failed to set current update set: ${(error as Error).message}. We'll still track it locally for direct field setting.`,
           },
         ],
       };
@@ -1466,10 +1995,312 @@ export class SimpleServiceNowMCPServer {
     }
   }
 
+  async createFlow(args: any) {
+    try {
+      const api = await this.getServiceNowApi();
+      
+      const flow = await api.createFlow({
+        name: args.name,
+        description: args.description,
+        scope: args.scope,
+        active: args.active
+      });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `✅ Successfully created Flow:\n` +
+                  `Name: ${args.name}\n` +
+                  `Description: ${args.description || 'None'}\n` +
+                  `Scope: ${args.scope || 'global'}\n` +
+                  `Active: ${args.active !== false}\n` +
+                  `ID: ${(flow as any).sys_id}`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `❌ Failed to create Flow: ${(error as Error).message}`,
+          },
+        ],
+      };
+    }
+  }
+
+  async createFlowTrigger(args: any) {
+    try {
+      const api = await this.getServiceNowApi();
+      
+      const trigger = await api.createFlowTrigger({
+        flow_id: args.flow_id,
+        type: args.type,
+        table: args.table,
+        condition: args.condition
+      });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `✅ Successfully created Flow Trigger:\n` +
+                  `Flow ID: ${args.flow_id}\n` +
+                  `Type: ${args.type}\n` +
+                  `Table: ${args.table || 'N/A'}\n` +
+                  `Condition: ${args.condition || 'None'}\n` +
+                  `ID: ${(trigger as any).sys_id}`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `❌ Failed to create Flow Trigger: ${(error as Error).message}`,
+          },
+        ],
+      };
+    }
+  }
+
+  async addCreateRecordAction(args: any) {
+    try {
+      const api = await this.getServiceNowApi();
+      
+      const action = await api.addCreateRecordAction({
+        flow_id: args.flow_id,
+        table: args.table,
+        field_values: args.field_values,
+        order: args.order
+      });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `✅ Successfully added Create Record action:\n` +
+                  `Flow ID: ${args.flow_id}\n` +
+                  `Table: ${args.table}\n` +
+                  `Field Values: ${JSON.stringify(args.field_values, null, 2)}\n` +
+                  `Order: ${args.order}\n` +
+                  `ID: ${(action as any).sys_id}`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `❌ Failed to add Create Record action: ${(error as Error).message}`,
+          },
+        ],
+      };
+    }
+  }
+
+  async addSendEmailAction(args: any) {
+    try {
+      const api = await this.getServiceNowApi();
+      
+      const action = await api.addSendEmailAction({
+        flow_id: args.flow_id,
+        to: args.to,
+        subject: args.subject,
+        body: args.body,
+        order: args.order
+      });
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `✅ Successfully added Send Email action:\n` +
+                  `Flow ID: ${args.flow_id}\n` +
+                  `To: ${args.to}\n` +
+                  `Subject: ${args.subject}\n` +
+                  `Order: ${args.order}\n` +
+                  `ID: ${(action as any).sys_id}`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `❌ Failed to add Send Email action: ${(error as Error).message}`,
+          },
+        ],
+      };
+    }
+  }
+
   async start() {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
     // Logger output is redirected to stderr in MCP mode
     this.logger.debug(`ServiceNow MCP Server started successfully`);
+  }
+
+  // Helper method to add update set to record data
+  private addUpdateSetToRecord(recordData: any): any {
+    if (this.currentUpdateSetId && !recordData.sys_update_set) {
+      recordData.sys_update_set = this.currentUpdateSetId;
+    }
+    return recordData;
+  }
+
+  async getCurrentUpdateSet() {
+    try {
+      if (this.currentUpdateSetId) {
+        // Optionally fetch details about the update set
+        const api = await this.getServiceNowApi();
+        try {
+          const updateSets = await api.getRecords('sys_update_set', `sys_id=${this.currentUpdateSetId}`);
+          if (updateSets.length > 0) {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: `✅ Current tracked update set:\n` +
+                        `Name: ${updateSets[0].name}\n` +
+                        `Description: ${updateSets[0].description || 'None'}\n` +
+                        `State: ${updateSets[0].state}\n` +
+                        `ID: ${this.currentUpdateSetId}\n` +
+                        `Note: This update set is being applied to all record creations in this session.`,
+                },
+              ],
+            };
+          }
+        } catch (fetchError) {
+          // If we can't fetch details, just return the ID
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `✅ Current tracked update set ID: ${this.currentUpdateSetId}\n` +
+                      `Note: This update set is being applied to all record creations in this session.`,
+              },
+            ],
+          };
+        }
+      }
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `ℹ️ No update set is currently tracked. Records will be created in the default update set.`,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `❌ Failed to get current update set: ${(error as Error).message}`,
+          },
+        ],
+      };
+    }
+  }
+
+  async updateBusinessRule(args: any) {
+    try {
+      const api = await this.getServiceNowApi();
+      
+      // Validate required field
+      if (!args.sys_id) {
+        throw new Error('sys_id parameter is required for updating business rules');
+      }
+      
+      // Get existing business rule
+      const existingRules = await api.getRecords('sys_script', `sys_id=${args.sys_id}`);
+      if (!existingRules || existingRules.length === 0) {
+        throw new Error(`Business Rule with sys_id ${args.sys_id} not found`);
+      }
+      
+      const existingRule = existingRules[0];
+      
+      // Validate 'when' field if provided
+      if (args.when) {
+        const validWhenValues = ['before', 'after', 'async', 'display'];
+        if (!validWhenValues.includes(args.when)) {
+          throw new Error(`Invalid 'when' value: ${args.when}. Must be one of: ${validWhenValues.join(', ')}`);
+        }
+      }
+      
+      // Handle operations if provided
+      let updateData: any = {};
+      
+      if (args.operation) {
+        let operations = args.operation;
+        if (typeof operations === 'string') {
+          operations = operations.split(',').map((op: string) => op.trim());
+        }
+        
+        updateData.insert = operations.includes('insert');
+        updateData.update = operations.includes('update');
+        updateData.delete = operations.includes('delete');
+        updateData.query = operations.includes('query');
+      }
+      
+      // Build update data with only provided fields
+      const fieldsToUpdate = ['name', 'table', 'when', 'script', 'description', 'order', 'condition', 'filter_condition', 'advanced', 'active', 'role_conditions'];
+      fieldsToUpdate.forEach(field => {
+        if (args[field] !== undefined) {
+          updateData[field] = args[field];
+        }
+      });
+      
+      // Validate script structure if provided
+      if (args.script && (!args.script.includes('function') || !args.script.includes('current'))) {
+        this.logger?.warn('Script may not follow proper structure. Should be wrapped in function(current, previous) {}');
+      }
+      
+      // Add update set tracking
+      const recordData = this.addUpdateSetToRecord(updateData);
+      
+      // Update the business rule
+      const updatedRule = await api.updateRecord('sys_script', args.sys_id, recordData);
+      
+      // Provide detailed feedback
+      const feedback = [
+        `✅ Successfully updated Business Rule:`,
+        `Name: ${args.name || existingRule.name}`,
+        `Table: ${args.table || existingRule.table}`,
+        `When: ${args.when || existingRule.when}`,
+        `ID: ${args.sys_id}`
+      ];
+      
+      const updatedFields = Object.keys(updateData).filter(key => key !== 'sys_update_set');
+      if (updatedFields.length > 0) {
+        feedback.push(`Updated fields: ${updatedFields.join(', ')}`);
+      }
+      
+      return {
+        content: [
+          {
+            type: 'text',
+            text: feedback.join('\n'),
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `❌ Failed to update Business Rule: ${(error as Error).message}`,
+          },
+        ],
+      };
+    }
   }
 }
