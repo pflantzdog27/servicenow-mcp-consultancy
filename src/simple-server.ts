@@ -1507,7 +1507,7 @@ export class SimpleServiceNowMCPServer {
       
       const recordData = this.addUpdateSetToRecord({
         name: args.name,
-        table: args.table,
+        collection: args.table,  // ServiceNow uses 'collection' not 'table' for sys_script
         when: args.when,
         insert: operations.includes('insert'),
         update: operations.includes('update'),
@@ -2252,12 +2252,17 @@ export class SimpleServiceNowMCPServer {
       }
       
       // Build update data with only provided fields
-      const fieldsToUpdate = ['name', 'table', 'when', 'script', 'description', 'order', 'condition', 'filter_condition', 'advanced', 'active', 'role_conditions'];
+      const fieldsToUpdate = ['name', 'when', 'script', 'description', 'order', 'condition', 'filter_condition', 'advanced', 'active', 'role_conditions'];
       fieldsToUpdate.forEach(field => {
         if (args[field] !== undefined) {
           updateData[field] = args[field];
         }
       });
+      
+      // Handle table field separately since ServiceNow uses 'collection'
+      if (args.table !== undefined) {
+        updateData.collection = args.table;
+      }
       
       // Validate script structure if provided
       if (args.script && (!args.script.includes('function') || !args.script.includes('current'))) {
